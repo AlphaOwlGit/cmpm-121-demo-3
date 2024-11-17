@@ -44,25 +44,50 @@ const spawnCacheChance = 0.1;
 const map = leaflet.map(document.getElementById("map")!, {
   center: oakesHQ,
   zoom: zoomAmount,
-  minZoom: zoomAmount,
+  minZoom: zoomAmount - 4,
   maxZoom: zoomAmount,
   scrollWheelZoom: false,
 });
+
+let autoLocate = false;
+let watchID: number;
+const pathHistory: leaflet.LatLng[] = [];
+const polyLine = leaflet.polyline(pathHistory).addTo(map);
 
 let playerLocation = oakesHQ;
 const marker = leaflet.marker(playerLocation);
 marker.bindTooltip("You are here");
 marker.addTo(map);
 
+const playerCoin: Coin[] = [];
+const coinText = document.createElement("p");
+coinText.innerHTML = "Storage: <div id=coins></div>";
+statusPanel.append(coinText);
+
 const updatePlayerLocation = (newLat: number, newLng: number) => {
-  playerLocation = leaflet.latLng(newLat, newLng);
+  centerPlayer(newLat, newLng);
+  updatePolyline();
+
+  saveState();
+};
+
+function centerPlayer(i: number, j: number) {
+  playerLocation = leaflet.latLng(i, j);
   marker.setLatLng(playerLocation);
   map.panTo(playerLocation);
-
   clearExistingCaches();
-
   cacheRegenerate();
-};
+}
+
+function updatePolyline() {
+  pathHistory.push(playerLocation);
+  polyLine.setLatLngs(pathHistory);
+}
+
+function clearPolyline() {
+  pathHistory.splice(0, pathHistory.length, playerLocation);
+  polyLine.setLatLngs(pathHistory);
+}
 
 const clearExistingCaches = () => {
   map.eachLayer((layer: leaflet.Rectangle) => {
@@ -100,10 +125,44 @@ rightButton.addEventListener("click", () => {
 });
 statusPanel.append(rightButton);
 
-const playerCoin: Coin[] = [];
-const coinText = document.createElement("p");
-coinText.innerHTML = "Storage: <div id=coins></div>";
-statusPanel.append(coinText);
+function findPos(pos: GeolocationPosition) {
+  updatePlayerLocation(pos.coords.latitude, pos.coords.longitude);
+  watchID = navigator.geolocation.watchPosition((pos) => {
+    updatePlayerLocation(pos.coords.latitude, pos.coords.longitude);
+  });
+}
+
+const geoPosition = document.createElement("button");
+geoPosition.innerHTML = "🌐";
+geoPosition.addEventListener("click", () => {
+  if (!autoLocate) {
+    autoLocate = true;
+    navigator.geolocation.getCurrentPosition(findPos);
+  } else {
+    autoLocate = false;
+    navigator.geolocation.clearWatch(watchID);
+  }
+});
+statusPanel.append(geoPosition);
+
+const resetButton = document.createElement("button");
+resetButton.innerHTML = "🚮";
+resetButton.addEventListener("click", () => {
+  const confirm = prompt(
+    "Are you sure you want to reset the game state? Type 'YES' to confirm.",
+  );
+  if (confirm === "YES") {
+    updatePlayerLocation(oakesHQ.lat, oakesHQ.lng);
+    localStorage.clear();
+    momentos.clear();
+    clearPolyline();
+    playerCoin.splice(0, playerCoin.length);
+    clearExistingCaches();
+    inventoryUpdate();
+    cacheRegenerate();
+  }
+});
+statusPanel.append(resetButton);
 
 const neighborhood = new Board(tileDegrees, cellSteps);
 
@@ -159,13 +218,12 @@ function spawnCache(i: number, j: number, bounds: leaflet.LatLngBounds) {
       <button id="deposit">Deposit</button>
       <div id=coins></div>`;
 
-    counterUpdate(cache, popupDiv);
+    cacheUpdate(cache, popupDiv);
 
     popupDiv.querySelector<HTMLButtonElement>("#collect")!.addEventListener(
       "click",
       () => {
         collectCoin(cache);
-        counterUpdate(cache, popupDiv);
         cacheUpdate(cache, popupDiv);
       },
     );
@@ -173,7 +231,6 @@ function spawnCache(i: number, j: number, bounds: leaflet.LatLngBounds) {
       "click",
       () => {
         depositCoin(cache);
-        counterUpdate(cache, popupDiv);
         cacheUpdate(cache, popupDiv);
       },
     );
@@ -195,27 +252,42 @@ function depositCoin(cache: Geocache) {
   }
 }
 
-function counterUpdate(cache: Geocache, popupDiv: HTMLDivElement) {
+function cacheUpdate(cache: Geocache, popupDiv: HTMLDivElement) {
   const cacheCoord = [cache.i, cache.j].toString();
   momentos.set(cacheCoord, cache.momento.toMomento());
+  saveState();
+  inventoryUpdate();
+
+  const textUpdate = popupDiv.querySelector<HTMLDivElement>("#value")!;
+  textUpdate.innerHTML = `
+    <div id=value>There are <span id="value">${cache.coins.length} </span>coins.</div>`;
 
   const availableCoins = popupDiv.querySelector<HTMLDivElement>("#coins")!;
   availableCoins.innerHTML = "";
   cache.coins.slice(0, 3).forEach((coin) => {
     availableCoins.innerHTML += `${coin.i}:${coin.j}#${coin.serial}</br>`;
   });
+}
 
+function inventoryUpdate() {
   const inventoryCoins = statusPanel.querySelector<HTMLDivElement>("#coins")!;
   inventoryCoins.innerHTML = "";
   playerCoin.forEach((coin) => {
-    inventoryCoins.innerHTML += `${coin.i}:${coin.j}#${coin.serial}</br>`;
+    const coinDiv = document.createElement("div");
+    coinDiv.innerHTML = `${coin.i}:${coin.j}#${coin.serial}`;
+    coinDiv.classList.add("coin");
+    coinDiv.addEventListener("click", () => {
+      centerOnCache(coin.i, coin.j);
+    });
+    inventoryCoins.append(coinDiv);
   });
 }
 
-function cacheUpdate(cache: Geocache, popupDiv: HTMLDivElement) {
-  const textUpdate = popupDiv.querySelector<HTMLDivElement>("#value")!;
-  textUpdate.innerHTML = `
-    <div id=value>There are <span id="value">${cache.coins.length} </span>coins.</div>`;
+function centerOnCache(i: number, j: number) {
+  const cacheLat = i * tileDegrees;
+  const cacheLng = j * tileDegrees;
+
+  map.setView(leaflet.latLng(cacheLat, cacheLng), zoomAmount);
 }
 
 function cacheSpawn() {
@@ -236,4 +308,44 @@ function cacheRegenerate() {
   cacheSpawn();
 }
 
-cacheSpawn();
+if (!localStorage.getItem("cache")) {
+  saveState();
+  cacheSpawn();
+} else {
+  loadState();
+}
+
+function saveState() {
+  const momentoArray = Array.from(momentos.entries());
+  localStorage.setItem("cache", JSON.stringify(momentoArray));
+  localStorage.setItem("playerCoins", JSON.stringify(playerCoin));
+  localStorage.setItem(
+    "playerLocation",
+    JSON.stringify({
+      i: playerLocation.lat,
+      j: playerLocation.lng,
+    }),
+  );
+  localStorage.setItem("pathHistory", JSON.stringify(pathHistory));
+}
+
+function loadState() {
+  const mementoArray = JSON.parse(localStorage.getItem("cache")!);
+  mementoArray.forEach((cache: string) => {
+    momentos.set(cache[0], cache[1]);
+  });
+
+  const storedCoins = JSON.parse(localStorage.getItem("playerCoins")!);
+  storedCoins.forEach((coin: Coin) => {
+    playerCoin.push(coin);
+  });
+
+  const { i, j } = JSON.parse(localStorage.getItem("playerLocation")!);
+  centerPlayer(i, j);
+
+  const storedPath = JSON.parse(localStorage.getItem("pathHistory")!);
+  pathHistory.splice(0, 0, ...pathHistory);
+  polyLine.setLatLngs(storedPath);
+
+  inventoryUpdate();
+}
