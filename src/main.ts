@@ -330,8 +330,8 @@ function saveState() {
 }
 
 function loadState() {
-  const mementoArray = JSON.parse(localStorage.getItem("cache")!);
-  mementoArray.forEach((cache: string) => {
+  const momentoArray = JSON.parse(localStorage.getItem("cache")!);
+  momentoArray.forEach((cache: string) => {
     momentos.set(cache[0], cache[1]);
   });
 
