@@ -5,10 +5,15 @@ import "./style.css";
 import "./leafletWorkaround.ts";
 
 import { Board } from "./board.ts";
+import {
+  setupMovementButtons,
+  setupResetButton,
+  updateInventory,
+} from "./ui.ts";
 
 import luck from "./luck.ts";
 
-interface Coin {
+export interface Coin {
   i: number;
   j: number;
   serial: number;
@@ -65,14 +70,21 @@ coinText.innerHTML = "Storage: <div id=coins></div>";
 statusPanel.append(coinText);
 
 const updatePlayerLocation = (newLat: number, newLng: number) => {
-  centerPlayer(newLat, newLng);
+  setPlayerLocation(newLat, newLng);
+  updateMapView();
   updatePolyline();
-
-  saveState();
+  persistGameState();
 };
 
-function centerPlayer(i: number, j: number) {
-  playerLocation = leaflet.latLng(i, j);
+function setPlayerLocation(lat: number, lng: number) {
+  playerLocation = leaflet.latLng(lat, lng);
+}
+
+function persistGameState() {
+  saveState();
+}
+
+function updateMapView() {
   marker.setLatLng(playerLocation);
   map.panTo(playerLocation);
   clearExistingCaches();
@@ -97,33 +109,19 @@ const clearExistingCaches = () => {
   });
 };
 
-const upButton = document.createElement("button");
-upButton.innerHTML = "⬆️";
-upButton.addEventListener("click", () => {
-  updatePlayerLocation(playerLocation.lat + tileDegrees, playerLocation.lng);
+// Movement buttons setup
+setupMovementButtons(statusPanel, {
+  up: () => {
+    updatePlayerLocation(playerLocation.lat + tileDegrees, playerLocation.lng),
+      console.log("Up button clicked");
+  },
+  down: () =>
+    updatePlayerLocation(playerLocation.lat - tileDegrees, playerLocation.lng),
+  left: () =>
+    updatePlayerLocation(playerLocation.lat, playerLocation.lng - tileDegrees),
+  right: () =>
+    updatePlayerLocation(playerLocation.lat, playerLocation.lng + tileDegrees),
 });
-statusPanel.append(upButton);
-
-const downButton = document.createElement("button");
-downButton.innerHTML = "⬇️";
-downButton.addEventListener("click", () => {
-  updatePlayerLocation(playerLocation.lat - tileDegrees, playerLocation.lng);
-});
-statusPanel.append(downButton);
-
-const leftButton = document.createElement("button");
-leftButton.innerHTML = "⬅️";
-leftButton.addEventListener("click", () => {
-  updatePlayerLocation(playerLocation.lat, playerLocation.lng - tileDegrees);
-});
-statusPanel.append(leftButton);
-
-const rightButton = document.createElement("button");
-rightButton.innerHTML = "➡️";
-rightButton.addEventListener("click", () => {
-  updatePlayerLocation(playerLocation.lat, playerLocation.lng + tileDegrees);
-});
-statusPanel.append(rightButton);
 
 function findPos(pos: GeolocationPosition) {
   updatePlayerLocation(pos.coords.latitude, pos.coords.longitude);
@@ -145,24 +143,23 @@ geoPosition.addEventListener("click", () => {
 });
 statusPanel.append(geoPosition);
 
-const resetButton = document.createElement("button");
-resetButton.innerHTML = "🚮";
-resetButton.addEventListener("click", () => {
-  const confirm = prompt(
-    "Are you sure you want to reset the game state? Type 'YES' to confirm.",
-  );
-  if (confirm === "YES") {
-    updatePlayerLocation(oakesHQ.lat, oakesHQ.lng);
-    localStorage.clear();
-    momentos.clear();
-    clearPolyline();
-    playerCoin.splice(0, playerCoin.length);
-    clearExistingCaches();
-    inventoryUpdate();
-    cacheRegenerate();
-  }
+setupResetButton(statusPanel, () => {
+  updatePlayerLocation(oakesHQ.lat, oakesHQ.lng);
+  localStorage.clear();
+  momentos.clear();
+  clearPolyline();
+  playerCoin.splice(0, playerCoin.length);
+  clearExistingCaches();
+  inventoryUpdate();
+  cacheRegenerate();
 });
-statusPanel.append(resetButton);
+
+inventoryUpdate();
+function inventoryUpdate() {
+  updateInventory(statusPanel, playerCoin, (coin: Coin) => {
+    centerOnCache(coin.i, coin.j);
+  });
+}
 
 const neighborhood = new Board(tileDegrees, cellSteps);
 
@@ -269,20 +266,6 @@ function cacheUpdate(cache: Geocache, popupDiv: HTMLDivElement) {
   });
 }
 
-function inventoryUpdate() {
-  const inventoryCoins = statusPanel.querySelector<HTMLDivElement>("#coins")!;
-  inventoryCoins.innerHTML = "";
-  playerCoin.forEach((coin) => {
-    const coinDiv = document.createElement("div");
-    coinDiv.innerHTML = `${coin.i}:${coin.j}#${coin.serial}`;
-    coinDiv.classList.add("coin");
-    coinDiv.addEventListener("click", () => {
-      centerOnCache(coin.i, coin.j);
-    });
-    inventoryCoins.append(coinDiv);
-  });
-}
-
 function centerOnCache(i: number, j: number) {
   const cacheLat = i * tileDegrees;
   const cacheLng = j * tileDegrees;
@@ -341,7 +324,8 @@ function loadState() {
   });
 
   const { i, j } = JSON.parse(localStorage.getItem("playerLocation")!);
-  centerPlayer(i, j);
+  setPlayerLocation(i, j);
+  updateMapView();
 
   const storedPath = JSON.parse(localStorage.getItem("pathHistory")!);
   pathHistory.splice(0, 0, ...pathHistory);
