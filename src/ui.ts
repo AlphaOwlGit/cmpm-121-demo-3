@@ -1,7 +1,6 @@
 import { Coin } from "./main.ts";
 
 function createButton(label: string, onClick: () => void): HTMLButtonElement {
-  console.log(`Creating button "${label}" with onClick:`, onClick);
   const button = document.createElement("button");
   button.innerHTML = label;
   button.addEventListener("click", onClick);

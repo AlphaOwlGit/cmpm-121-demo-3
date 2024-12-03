@@ -111,10 +111,8 @@ const clearExistingCaches = () => {
 
 // Movement buttons setup
 setupMovementButtons(statusPanel, {
-  up: () => {
+  up: () =>
     updatePlayerLocation(playerLocation.lat + tileDegrees, playerLocation.lng),
-      console.log("Up button clicked");
-  },
   down: () =>
     updatePlayerLocation(playerLocation.lat - tileDegrees, playerLocation.lng),
   left: () =>
